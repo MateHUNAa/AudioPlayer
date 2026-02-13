@@ -3,6 +3,7 @@ import TrackPlayer, {
   State,
   Capability,
   AppKilledPlaybackBehavior,
+  TrackType,
 } from 'react-native-track-player';
 import { Track } from '../../domain/models/Track';
 import {
@@ -10,10 +11,23 @@ import {
   AudioEventCallbacks,
   AudioPortState,
 } from '../../domain/ports/IAudioPort';
+import { getMimeTypeForFormat } from '../utils/AudioMimeTypes';
+
+function encodeFileUri(filePath: string): string {
+  return (
+    'file://' +
+    filePath
+      .split('/')
+      .map(segment => encodeURIComponent(segment))
+      .join('/')
+  );
+}
 
 function mapTrackToPlayerTrack(track: Track): {
   id: string;
   url: string;
+  type: TrackType;
+  contentType: string;
   title: string;
   artist: string;
   album: string;
@@ -22,7 +36,9 @@ function mapTrackToPlayerTrack(track: Track): {
 } {
   return {
     id: track.id,
-    url: `file://${track.filePath}`,
+    url: encodeFileUri(track.filePath),
+    type: TrackType.Default,
+    contentType: getMimeTypeForFormat(track.format),
     title: track.title,
     artist: track.artist,
     album: track.album,
@@ -237,7 +253,10 @@ export class TrackPlayerAdapter implements IAudioPort {
           const { position, duration } = await TrackPlayer.getProgress();
           this.callbacks.onPositionUpdate?.(position);
 
-          if (duration > 0 && Math.abs(duration - this.lastReportedDuration) > 0.5) {
+          if (
+            duration > 0 &&
+            Math.abs(duration - this.lastReportedDuration) > 0.5
+          ) {
             this.lastReportedDuration = duration;
             this.callbacks.onDurationUpdate?.(duration);
           }

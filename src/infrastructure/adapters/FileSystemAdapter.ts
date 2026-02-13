@@ -1,5 +1,10 @@
 import RNFS from 'react-native-fs';
-import { IFileSystemPort, FileEntry, DirectoryScanResult } from '../../domain/ports/IFileSystemPort';
+import {
+  IFileSystemPort,
+  FileEntry,
+  DirectoryScanResult,
+} from '../../domain/ports/IFileSystemPort';
+import { getMimeTypeForExtension } from '../utils/AudioMimeTypes';
 
 function extractExtension(fileName: string): string {
   const lastDot = fileName.lastIndexOf('.');
@@ -8,20 +13,6 @@ function extractExtension(fileName: string): string {
   }
   return fileName.substring(lastDot + 1).toLowerCase();
 }
-
-function buildMimeTypeMap(): ReadonlyMap<string, string> {
-  const map = new Map<string, string>();
-  map.set('mp3', 'audio/mpeg');
-  map.set('flac', 'audio/flac');
-  map.set('wav', 'audio/wav');
-  map.set('aac', 'audio/aac');
-  map.set('ogg', 'audio/ogg');
-  map.set('wma', 'audio/x-ms-wma');
-  map.set('m4a', 'audio/mp4');
-  return map;
-}
-
-const MimeTypes = buildMimeTypeMap();
 const DefaultMusicPath = `${RNFS.ExternalStorageDirectoryPath}/Music`;
 
 export class FileSystemAdapter implements IFileSystemPort {
@@ -38,10 +29,16 @@ export class FileSystemAdapter implements IFileSystemPort {
     let scannedDirectories = 0;
     let totalFiles = 0;
 
-    await this.scanRecursive(directoryPath, extensionSet, collectedFiles, errors, {
-      scannedDirectories: 0,
-      totalFiles: 0,
-    }).then(counts => {
+    await this.scanRecursive(
+      directoryPath,
+      extensionSet,
+      collectedFiles,
+      errors,
+      {
+        scannedDirectories: 0,
+        totalFiles: 0,
+      },
+    ).then(counts => {
       scannedDirectories = counts.scannedDirectories;
       totalFiles = counts.totalFiles;
     });
@@ -101,7 +98,7 @@ export class FileSystemAdapter implements IFileSystemPort {
   /** @returns MIME type string for the given file */
   async getFileMimeType(filePath: string): Promise<string> {
     const extension = extractExtension(filePath.split('/').pop() ?? '');
-    return MimeTypes.get(extension) ?? 'application/octet-stream';
+    return getMimeTypeForExtension(extension);
   }
 
   /** @param dirPath - Current directory being scanned */
@@ -126,7 +123,13 @@ export class FileSystemAdapter implements IFileSystemPort {
           if (item.name.startsWith('.')) {
             continue;
           }
-          await this.scanRecursive(item.path, extensionSet, results, errors, counts);
+          await this.scanRecursive(
+            item.path,
+            extensionSet,
+            results,
+            errors,
+            counts,
+          );
           continue;
         }
 
@@ -152,7 +155,8 @@ export class FileSystemAdapter implements IFileSystemPort {
         results.push(entry);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : `Failed to scan ${dirPath}`;
+      const message =
+        error instanceof Error ? error.message : `Failed to scan ${dirPath}`;
       errors.push(message);
     }
 
