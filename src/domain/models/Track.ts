@@ -12,6 +12,9 @@
 /** @field Beats per minute if available */
 /** @field File size in bytes */
 /** @field Timestamp when track was added to library */
+import { TrackAnalysis } from './TrackAnalysis';
+
+/** @field Audio analysis used for vibe-aware shuffle, null until analyzed */
 export interface Track {
   readonly id: string;
   readonly filePath: string;
@@ -27,6 +30,7 @@ export interface Track {
   readonly bpm: number | null;
   readonly fileSize: number;
   readonly addedAt: number;
+  readonly analysis?: TrackAnalysis | null;
 }
 
 /** @enum Supported audio file formats */
@@ -73,7 +77,7 @@ export function createTrack(
 
 /** @param filePath - Absolute file path used to derive a deterministic ID */
 /** @returns A stable hash string identifier */
-function generateTrackId(filePath: string): string {
+export function generateTrackId(filePath: string): string {
   let hash = 0;
   for (let i = 0; i < filePath.length; i++) {
     const char = filePath.charCodeAt(i);

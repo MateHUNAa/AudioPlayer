@@ -76,3 +76,7 @@ android/app/src/main/res/raw
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# aubio native source (downloaded at build time)
+android/app/src/main/jni/aubio/
+android/app/src/main/jni/aubio-*.zip

@@ -6,7 +6,10 @@ import { QueueScreen } from '../screens/QueueScreen';
 import { AlbumsScreen } from '../screens/AlbumsScreen';
 import { PlaylistsScreen } from '../screens/PlaylistsScreen';
 import { FavouritesScreen } from '../screens/FavouritesScreen';
+import { SuggestedScreen } from '../screens/SuggestedScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 import { usePlayer } from '../hooks/usePlayer';
+import { usePlaybackProgress } from '../state/progressStore';
 import {
   LibraryIcon,
   VinylIcon,
@@ -22,7 +25,9 @@ type SubRoute =
   | { type: 'none' }
   | { type: 'albums' }
   | { type: 'playlists' }
-  | { type: 'favourites' };
+  | { type: 'favourites' }
+  | { type: 'suggested' }
+  | { type: 'settings' };
 
 interface TabDefinition {
   readonly key: TabRoute;
@@ -34,6 +39,17 @@ const Tabs: readonly TabDefinition[] = [
   { key: 'player', label: 'Now Playing' },
   { key: 'queue', label: 'Queue' },
 ];
+
+/** Only this thin bar re-renders on every progress tick, not the whole mini player. */
+function MiniPlayerProgress() {
+  const { fraction } = usePlaybackProgress();
+  const width = `${Math.min(100, fraction * 100)}%` as const;
+  return (
+    <View style={styles.miniPlayerProgress}>
+      <View style={[styles.miniPlayerProgressFill, { width }]} />
+    </View>
+  );
+}
 
 interface MiniPlayerBarProps {
   readonly onPress: () => void;
@@ -54,22 +70,13 @@ function MiniPlayerBar({ onPress }: MiniPlayerBarProps) {
     return null;
   }
 
-  const progressWidth = `${Math.min(
-    100,
-    playerState.progress * 100,
-  )}%` as const;
-
   return (
     <TouchableOpacity
       style={styles.miniPlayer}
       onPress={onPress}
       activeOpacity={0.85}
     >
-      <View style={styles.miniPlayerProgress}>
-        <View
-          style={[styles.miniPlayerProgressFill, { width: progressWidth }]}
-        />
-      </View>
+      <MiniPlayerProgress />
 
       <View style={styles.miniPlayerContent}>
         <View style={styles.miniPlayerArtwork}>
@@ -199,11 +206,23 @@ export function AppNavigator() {
     setSubRoute({ type: 'favourites' });
   }, []);
 
+  const navigateToSuggested = useCallback(() => {
+    setSubRoute({ type: 'suggested' });
+  }, []);
+
+  const navigateToSettings = useCallback(() => {
+    setSubRoute({ type: 'settings' });
+  }, []);
+
   const navigateBackFromSub = useCallback(() => {
     setSubRoute({ type: 'none' });
   }, []);
 
   const renderScreen = useCallback(() => {
+    if (subRoute.type === 'settings') {
+      return <SettingsScreen onBack={navigateBackFromSub} />;
+    }
+
     if (activeTab === 'library' && subRoute.type !== 'none') {
       switch (subRoute.type) {
         case 'albums':
@@ -212,6 +231,8 @@ export function AppNavigator() {
           return <PlaylistsScreen onBack={navigateBackFromSub} />;
         case 'favourites':
           return <FavouritesScreen onBack={navigateBackFromSub} />;
+        case 'suggested':
+          return <SuggestedScreen onBack={navigateBackFromSub} />;
       }
     }
 
@@ -222,6 +243,7 @@ export function AppNavigator() {
             onNavigateAlbums={navigateToAlbums}
             onNavigatePlaylists={navigateToPlaylists}
             onNavigateFavourites={navigateToFavourites}
+            onNavigateSuggested={navigateToSuggested}
           />
         );
       case 'player':
@@ -229,6 +251,7 @@ export function AppNavigator() {
           <PlayerScreen
             onOpenQueue={navigateToQueue}
             onOpenLibrary={navigateToLibrary}
+            onOpenSettings={navigateToSettings}
           />
         );
       case 'queue':
@@ -239,6 +262,7 @@ export function AppNavigator() {
             onNavigateAlbums={navigateToAlbums}
             onNavigatePlaylists={navigateToPlaylists}
             onNavigateFavourites={navigateToFavourites}
+            onNavigateSuggested={navigateToSuggested}
           />
         );
     }
@@ -251,6 +275,8 @@ export function AppNavigator() {
     navigateToAlbums,
     navigateToPlaylists,
     navigateToFavourites,
+    navigateToSuggested,
+    navigateToSettings,
     navigateBackFromSub,
   ]);
 

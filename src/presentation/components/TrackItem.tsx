@@ -2,11 +2,15 @@ import React, { useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Track } from '../../domain/models/Track';
 import {
+  CloseIcon,
   HeartIcon,
   HeartFilledIcon,
   MusicIcon,
   PlaylistAddIcon,
 } from './Icons';
+
+/** Every row is exactly this tall; lists rely on it for getItemLayout. */
+export const TrackItemHeight = 64;
 
 interface TrackItemProps {
   readonly track: Track;
@@ -17,6 +21,8 @@ interface TrackItemProps {
   readonly isFavourite?: boolean;
   readonly onToggleFavourite?: (track: Track) => void;
   readonly onAddToPlaylist?: (track: Track) => void;
+  readonly onDismiss?: (track: Track) => void;
+  readonly badge?: string;
   readonly showActions?: boolean;
 }
 
@@ -40,6 +46,8 @@ function TrackItemComponent({
   isFavourite = false,
   onToggleFavourite,
   onAddToPlaylist,
+  onDismiss,
+  badge,
   showActions = true,
 }: TrackItemProps) {
   const handlePress = useCallback(() => {
@@ -53,6 +61,10 @@ function TrackItemComponent({
   const handleAddToPlaylist = useCallback(() => {
     onAddToPlaylist?.(track);
   }, [track, onAddToPlaylist]);
+
+  const handleDismiss = useCallback(() => {
+    onDismiss?.(track);
+  }, [track, onDismiss]);
 
   return (
     <TouchableOpacity
@@ -125,6 +137,16 @@ function TrackItemComponent({
               )}
             </TouchableOpacity>
           )}
+          {onDismiss && (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleDismiss}
+              activeOpacity={0.6}
+              hitSlop={ActionHitSlop}
+            >
+              <CloseIcon size={16} color="#555" />
+            </TouchableOpacity>
+          )}
           {onAddToPlaylist && (
             <TouchableOpacity
               style={styles.actionButton}
@@ -142,6 +164,7 @@ function TrackItemComponent({
         <Text style={[styles.duration, isActive && styles.activeSubtext]}>
           {formatDuration(track.duration)}
         </Text>
+        {badge != null && <Text style={styles.badge}>{badge}</Text>}
         {track.format !== 'mp3' && (
           <Text style={[styles.format, isActive && styles.activeFormat]}>
             {track.format.toUpperCase()}
@@ -158,7 +181,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    height: TrackItemHeight,
     paddingHorizontal: 16,
     backgroundColor: '#121212',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -203,11 +226,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 8,
   },
+  // Fixed line heights keep rows the same height for scripts with taller glyphs (e.g. Arabic).
   title: {
     fontSize: 16,
+    lineHeight: 21,
     fontWeight: '500',
     color: '#e0e0e0',
-    marginBottom: 3,
+    marginBottom: 2,
   },
   subtitleRow: {
     flexDirection: 'row',
@@ -215,6 +240,7 @@ const styles = StyleSheet.create({
   },
   artist: {
     fontSize: 13,
+    lineHeight: 17,
     color: '#999',
     flexShrink: 1,
   },
@@ -225,8 +251,16 @@ const styles = StyleSheet.create({
   },
   album: {
     fontSize: 13,
+    lineHeight: 17,
     color: '#999',
     flexShrink: 2,
+  },
+  badge: {
+    fontSize: 11,
+    color: '#e8a838',
+    fontWeight: '700',
+    marginTop: 3,
+    fontVariant: ['tabular-nums'],
   },
   actionsContainer: {
     flexDirection: 'row',

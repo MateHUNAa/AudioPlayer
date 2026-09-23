@@ -1,6 +1,7 @@
 import React, { useCallback, useState, useRef } from 'react';
 import { View, Text, StyleSheet, PanResponder, LayoutChangeEvent } from 'react-native';
 import { usePlayer } from '../hooks/usePlayer';
+import { usePlaybackProgress } from '../state/progressStore';
 
 interface ProgressBarProps {
   readonly height?: number;
@@ -33,16 +34,17 @@ function ProgressBarComponent({
   showThumb = true,
 }: ProgressBarProps) {
   const { controls, playerState } = usePlayer();
+  const progress = usePlaybackProgress();
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekFraction, setSeekFraction] = useState(0);
   const barWidthRef = useRef(0);
   const barXRef = useRef(0);
 
-  const displayFraction = isSeeking ? seekFraction : playerState.progress;
+  const displayFraction = isSeeking ? seekFraction : progress.fraction;
   const displayPosition = isSeeking
-    ? seekFraction * playerState.duration
-    : playerState.position;
-  const remaining = playerState.duration - displayPosition;
+    ? seekFraction * progress.duration
+    : progress.position;
+  const remaining = progress.duration - displayPosition;
 
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
     const { x, width } = event.nativeEvent.layout;

@@ -131,3 +131,32 @@ export type {
   PersistedPlaybackState,
   LibraryScanMeta,
 } from './ports/IStoragePort';
+export type { IBpmPort } from './ports/IBpmPort';
+export type { ISkipStatsPort } from './ports/ISkipStatsPort';
+
+export type { BpmMode } from './models/ShuffleConfig';
+export {
+  withBpmMode,
+  withBpmTolerance,
+  withBpmPenalty,
+  withSkipPenalty,
+} from './models/ShuffleConfig';
+
+export type { SkipRecord, SkipStatsMap } from './models/SkipStats';
+export {
+  createEmptySkipStats,
+  createSkipRecord,
+  recordSkip,
+  recordPlay,
+  computeRawSkipRate,
+  computeDecayedSkipRate,
+  computeAvgListenPercent,
+  isFrequentlySkipped,
+  computeSkipPenalty,
+  serializeSkipStats,
+  deserializeSkipStats,
+  pruneStaleRecords,
+  mergeSkipStats,
+} from './models/SkipStats';
+
+export { updateSkipStats } from './engine/QueueManager';

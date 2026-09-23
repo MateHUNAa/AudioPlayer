@@ -13,14 +13,19 @@ import {
 } from '../../domain/ports/IAudioPort';
 import { getMimeTypeForFormat } from '../utils/AudioMimeTypes';
 
+const LoneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+function encodeSegment(segment: string): string {
+  try {
+    return encodeURIComponent(segment);
+  } catch {
+    // encodeURIComponent throws URIError on malformed UTF-16; never let a file name crash playback.
+    return encodeURIComponent(segment.replace(LoneSurrogate, '�'));
+  }
+}
+
 function encodeFileUri(filePath: string): string {
-  return (
-    'file://' +
-    filePath
-      .split('/')
-      .map(segment => encodeURIComponent(segment))
-      .join('/')
-  );
+  return 'file://' + filePath.split('/').map(encodeSegment).join('/');
 }
 
 function mapTrackToPlayerTrack(track: Track): {
@@ -67,12 +72,17 @@ function mapNativeStateToPortState(nativeState: State): AudioPortState {
   }
 }
 
+/** Native progress events per second; replaces the old JS setInterval polling. */
+const ProgressIntervalSeconds = 1;
+
 export class TrackPlayerAdapter implements IAudioPort {
   private callbacks: Partial<AudioEventCallbacks> = {};
   private initialized = false;
-  private positionInterval: ReturnType<typeof setInterval> | null = null;
   private eventSubscriptions: Array<{ remove: () => void }> = [];
   private lastReportedDuration = 0;
+  /** Mirror of the native queue order, so skips don't fetch the whole queue over the bridge. */
+  private nativeOrder: string[] = [];
+  private nativeIndex = new Map<string, number>();
 
   async initialize(): Promise<void> {
     if (this.initialized) {
@@ -101,15 +111,14 @@ export class TrackPlayerAdapter implements IAudioPort {
       android: {
         appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
       },
+      progressUpdateEventInterval: ProgressIntervalSeconds,
     });
 
     this.registerNativeEventListeners();
-    this.startPositionPolling();
     this.initialized = true;
   }
 
   async destroy(): Promise<void> {
-    this.stopPositionPolling();
     this.removeNativeEventListeners();
     await TrackPlayer.reset();
     this.initialized = false;
@@ -117,10 +126,9 @@ export class TrackPlayerAdapter implements IAudioPort {
   }
 
   async play(track: Track): Promise<void> {
-    const queue = await TrackPlayer.getQueue();
-    const existingIndex = queue.findIndex(t => t.id === track.id);
+    const existingIndex = this.nativeIndex.get(track.id);
 
-    if (existingIndex >= 0) {
+    if (existingIndex !== undefined) {
       await TrackPlayer.skip(existingIndex);
       await TrackPlayer.play();
       return;
@@ -128,6 +136,7 @@ export class TrackPlayerAdapter implements IAudioPort {
 
     await TrackPlayer.reset();
     await TrackPlayer.add(mapTrackToPlayerTrack(track));
+    this.setNativeOrder([track.id]);
     await TrackPlayer.play();
   }
 
@@ -142,6 +151,7 @@ export class TrackPlayerAdapter implements IAudioPort {
   async stop(): Promise<void> {
     await TrackPlayer.stop();
     await TrackPlayer.reset();
+    this.setNativeOrder([]);
   }
 
   async seekTo(positionSeconds: number): Promise<void> {
@@ -179,22 +189,103 @@ export class TrackPlayerAdapter implements IAudioPort {
 
   async setQueue(tracks: readonly Track[]): Promise<void> {
     await TrackPlayer.reset();
+    this.setNativeOrder([]);
     const mapped = tracks.map(mapTrackToPlayerTrack);
     if (mapped.length > 0) {
       await TrackPlayer.add(mapped);
     }
+    this.setNativeOrder(tracks.map(t => t.id));
   }
 
   async skipToTrack(trackId: string): Promise<void> {
-    const queue = await TrackPlayer.getQueue();
-    const targetIndex = queue.findIndex(t => t.id === trackId);
+    let targetIndex = this.nativeIndex.get(trackId);
 
-    if (targetIndex < 0) {
+    if (targetIndex === undefined) {
+      const queue = await TrackPlayer.getQueue();
+      this.setNativeOrder(queue.map(t => String(t.id)));
+      targetIndex = this.nativeIndex.get(trackId);
+    }
+
+    if (targetIndex === undefined) {
       throw new Error(`Track ${trackId} not found in native queue`);
     }
 
     await TrackPlayer.skip(targetIndex);
     await TrackPlayer.play();
+  }
+
+  async alignQueue(
+    currentTrackId: string,
+    tracks: readonly Track[],
+    currentIndex: number,
+    frontCount?: number,
+  ): Promise<boolean> {
+    const activeIndex = await TrackPlayer.getActiveTrackIndex();
+    if (
+      activeIndex === undefined ||
+      this.nativeOrder[activeIndex] !== currentTrackId ||
+      tracks[currentIndex]?.id !== currentTrackId
+    ) {
+      return false;
+    }
+    const before = tracks.slice(0, currentIndex);
+    const upcoming = tracks.slice(currentIndex + 1);
+    const nativeBefore = this.nativeOrder.slice(0, activeIndex);
+    const sameBefore =
+      nativeBefore.length === before.length && nativeBefore.every((id, i) => id === before[i].id);
+
+    if (sameBefore && frontCount != null && frontCount > 0 && frontCount < upcoming.length) {
+      // Only the first frontCount songs moved: pull them out and re-insert them after the
+      // current one, instead of re-sending the whole queue (TrackPlayer.add runs on the UI thread).
+      const front = upcoming.slice(0, frontCount);
+      const frontIds = new Set(front.map(t => t.id));
+      const nativeUpcoming = this.nativeOrder.slice(activeIndex + 1);
+      const nativeRest = nativeUpcoming.filter(id => !frontIds.has(id));
+      const targetRest = upcoming.slice(frontCount);
+      const cheapPathValid =
+        nativeUpcoming.length === upcoming.length &&
+        nativeRest.length === targetRest.length &&
+        nativeRest.every((id, i) => id === targetRest[i].id);
+      if (cheapPathValid) {
+        const indices: number[] = [];
+        nativeUpcoming.forEach((id, i) => {
+          if (frontIds.has(id)) {
+            indices.push(activeIndex + 1 + i);
+          }
+        });
+        await TrackPlayer.remove(indices);
+        await TrackPlayer.add(front.map(mapTrackToPlayerTrack), activeIndex + 1);
+        this.setNativeOrder(tracks.map(t => t.id));
+        return true;
+      }
+    }
+
+    await TrackPlayer.removeUpcomingTracks();
+    if (upcoming.length > 0) {
+      await TrackPlayer.add(upcoming.map(mapTrackToPlayerTrack));
+    }
+
+    if (!sameBefore) {
+      // Rebuild the already-played part around the current song, which keeps playing.
+      if (activeIndex > 0) {
+        await TrackPlayer.remove(Array.from({ length: activeIndex }, (_, i) => i));
+      }
+      if (before.length > 0) {
+        await TrackPlayer.add(before.map(mapTrackToPlayerTrack), 0);
+      }
+    }
+    this.setNativeOrder(tracks.map(t => t.id));
+    return true;
+  }
+
+  private setNativeOrder(ids: string[]): void {
+    this.nativeOrder = ids;
+    this.nativeIndex = new Map();
+    ids.forEach((id, i) => {
+      if (!this.nativeIndex.has(id)) {
+        this.nativeIndex.set(id, i);
+      }
+    });
   }
 
   private registerNativeEventListeners(): void {
@@ -227,11 +318,32 @@ export class TrackPlayerAdapter implements IAudioPort {
     const activeTrackChangedSubscription = TrackPlayer.addEventListener(
       Event.PlaybackActiveTrackChanged,
       event => {
-        const trackId = event.track?.id ?? null;
-        this.callbacks.onActiveTrackChanged?.(trackId as string | null);
+        const trackId = event.track?.id != null ? String(event.track.id) : null;
+        const previous = event.lastTrack
+          ? {
+              trackId: event.lastTrack.id != null ? String(event.lastTrack.id) : null,
+              position: event.lastPosition ?? 0,
+            }
+          : null;
+        this.callbacks.onActiveTrackChanged?.(trackId, previous);
       },
     );
     this.eventSubscriptions.push(activeTrackChangedSubscription);
+
+    const progressSubscription = TrackPlayer.addEventListener(
+      Event.PlaybackProgressUpdated,
+      event => {
+        this.callbacks.onPositionUpdate?.(event.position);
+        if (
+          event.duration > 0 &&
+          Math.abs(event.duration - this.lastReportedDuration) > 0.5
+        ) {
+          this.lastReportedDuration = event.duration;
+          this.callbacks.onDurationUpdate?.(event.duration);
+        }
+      },
+    );
+    this.eventSubscriptions.push(progressSubscription);
   }
 
   private removeNativeEventListeners(): void {
@@ -239,38 +351,5 @@ export class TrackPlayerAdapter implements IAudioPort {
       subscription.remove();
     }
     this.eventSubscriptions = [];
-  }
-
-  private startPositionPolling(): void {
-    const PollingIntervalMs = 500 as const;
-
-    this.stopPositionPolling();
-
-    this.positionInterval = setInterval(async () => {
-      try {
-        const playbackState = await TrackPlayer.getPlaybackState();
-        if (playbackState.state === State.Playing) {
-          const { position, duration } = await TrackPlayer.getProgress();
-          this.callbacks.onPositionUpdate?.(position);
-
-          if (
-            duration > 0 &&
-            Math.abs(duration - this.lastReportedDuration) > 0.5
-          ) {
-            this.lastReportedDuration = duration;
-            this.callbacks.onDurationUpdate?.(duration);
-          }
-        }
-      } catch {
-        /* swallow polling errors silently */
-      }
-    }, PollingIntervalMs);
-  }
-
-  private stopPositionPolling(): void {
-    if (this.positionInterval !== null) {
-      clearInterval(this.positionInterval);
-      this.positionInterval = null;
-    }
   }
 }

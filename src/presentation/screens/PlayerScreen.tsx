@@ -13,6 +13,8 @@ import { useFavourites } from '../hooks/useFavourites';
 import { ProgressBar } from '../components/ProgressBar';
 import { PlayerControls } from '../components/PlayerControls';
 import { ShuffleMode } from '../../domain/models/PlaybackState';
+import { camelotLabel, isCurrentAnalysis } from '../../domain/models/TrackAnalysis';
+import { effectiveBpm } from '../../domain/engine/ShuffleEngine';
 import {
   BackIcon,
   MenuIcon,
@@ -24,11 +26,13 @@ import {
   RepeatIcon,
   RepeatOnceIcon,
   AlertIcon,
+  AdjustmentsIcon,
 } from '../components/Icons';
 
 interface PlayerScreenProps {
   readonly onOpenQueue?: () => void;
   readonly onOpenLibrary?: () => void;
+  readonly onOpenSettings?: () => void;
   readonly onBack?: () => void;
 }
 
@@ -85,6 +89,7 @@ function resolveFormatBadgeColor(format: string): string {
 export function PlayerScreen({
   onOpenQueue,
   onOpenLibrary,
+  onOpenSettings,
   onBack,
 }: PlayerScreenProps) {
   const { playerState } = usePlayer();
@@ -105,6 +110,10 @@ export function PlayerScreen({
   const handleOpenLibrary = useCallback(() => {
     onOpenLibrary?.();
   }, [onOpenLibrary]);
+
+  const handleOpenSettings = useCallback(() => {
+    onOpenSettings?.();
+  }, [onOpenSettings]);
 
   const handleBack = useCallback(() => {
     onBack?.();
@@ -138,6 +147,20 @@ export function PlayerScreen({
         return '';
     }
   }, [repeatMode]);
+
+  const vibe = useMemo(() => {
+    if (!currentTrack) {
+      return null;
+    }
+    const analysis = isCurrentAnalysis(currentTrack.analysis) ? currentTrack.analysis : null;
+    const bpm = effectiveBpm(currentTrack);
+    return {
+      mood: analysis?.mood ?? null,
+      key: analysis ? `${analysis.key} ${analysis.scale}` : null,
+      camelot: analysis ? camelotLabel(analysis) : null,
+      bpm: bpm != null ? Math.round(bpm) : null,
+    };
+  }, [currentTrack]);
 
   const formatBadgeColor = useMemo(() => {
     if (!currentTrack) {
@@ -215,16 +238,28 @@ export function PlayerScreen({
               : 'Library'}
           </Text>
         </View>
-        {onOpenQueue && (
-          <TouchableOpacity
-            style={styles.queueButton}
-            onPress={handleOpenQueue}
-            activeOpacity={0.6}
-            hitSlop={hitSlop}
-          >
-            <MenuIcon size={20} color="#e0e0e0" />
-          </TouchableOpacity>
-        )}
+        <View style={styles.headerActions}>
+          {onOpenSettings && (
+            <TouchableOpacity
+              style={styles.queueButton}
+              onPress={handleOpenSettings}
+              activeOpacity={0.6}
+              hitSlop={hitSlop}
+            >
+              <AdjustmentsIcon size={20} color="#e0e0e0" />
+            </TouchableOpacity>
+          )}
+          {onOpenQueue && (
+            <TouchableOpacity
+              style={styles.queueButton}
+              onPress={handleOpenQueue}
+              activeOpacity={0.6}
+              hitSlop={hitSlop}
+            >
+              <MenuIcon size={20} color="#e0e0e0" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <ScrollView
@@ -370,10 +405,23 @@ export function PlayerScreen({
               </View>
             )}
 
-            {currentTrack.bpm != null && (
+            {vibe?.mood != null && (
+              <View style={[styles.metadataChip, styles.vibeChip]}>
+                <Text style={styles.vibeChipText}>{vibe.mood}</Text>
+              </View>
+            )}
+
+            {vibe?.bpm != null && (
+              <View style={styles.metadataChip}>
+                <Text style={styles.metadataChipText}>{vibe.bpm} BPM</Text>
+              </View>
+            )}
+
+            {vibe?.key != null && (
               <View style={styles.metadataChip}>
                 <Text style={styles.metadataChipText}>
-                  {currentTrack.bpm} BPM
+                  {vibe.key}
+                  {vibe.camelot ? ` · ${vibe.camelot}` : ''}
                 </Text>
               </View>
             )}
@@ -413,6 +461,14 @@ export function PlayerScreen({
 const hitSlop = { top: 10, bottom: 10, left: 10, right: 10 } as const;
 
 const styles = StyleSheet.create({
+  vibeChip: {
+    backgroundColor: '#241a33',
+  },
+  vibeChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#c7a8ff',
+  },
   screen: {
     flex: 1,
     backgroundColor: '#121212',
@@ -461,11 +517,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   queueButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    backgroundColor: '#1a1a2e',
     alignItems: 'center',
     justifyContent: 'center',
   },

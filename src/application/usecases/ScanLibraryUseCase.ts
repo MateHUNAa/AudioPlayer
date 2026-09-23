@@ -142,9 +142,16 @@ export class ScanLibraryUseCase {
     const newFiles = scanResult.files.filter(
       f => !existingPathMap.has(f.path) || brokenPaths.has(f.path),
     );
-    const healthyTracks = existingTracks.filter(
-      t => !brokenPaths.has(t.filePath),
-    );
+    const scannedSizes = new Map(scanResult.files.map(f => [f.path, f.size]));
+    const healthyTracks = existingTracks
+      .filter(t => !brokenPaths.has(t.filePath))
+      .map(t => {
+        // A replaced file at the same path needs a fresh analysis.
+        const size = scannedSizes.get(t.filePath);
+        return size !== undefined && size !== t.fileSize && t.analysis
+          ? { ...t, fileSize: size, analysis: null }
+          : t;
+      });
     console.log(
       '[ScanLibrary] Existing tracks:',
       existingTracks.length,
@@ -229,7 +236,12 @@ export class ScanLibraryUseCase {
           fileSize: file.size,
         });
 
-        allTracks.push(track);
+        const previous = existingPathMap.get(file.path);
+        allTracks.push(
+          previous && previous.fileSize === file.size
+            ? { ...track, addedAt: previous.addedAt, analysis: previous.analysis ?? null }
+            : track,
+        );
       }
 
       processedCount += batch.length;

@@ -27,3 +27,9 @@ export type {
   BuildQueueResult,
   BuildQueueOptions,
 } from './usecases/BuildQueueUseCase';
+
+export { AnalyzeBpmUseCase } from './usecases/AnalyzeBpmUseCase';
+export type { AnalyzeBpmResult } from './usecases/AnalyzeBpmUseCase';
+
+export { RecordSkipUseCase } from './usecases/RecordSkipUseCase';
+export type { RecordSkipResult } from './usecases/RecordSkipUseCase';

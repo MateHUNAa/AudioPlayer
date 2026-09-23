@@ -1,3 +1,4 @@
+import { NativeModules } from 'react-native';
 import { IMetadataPort, TrackMetadata, MetadataParseResult } from '../../domain/ports/IMetadataPort';
 import { TrackFormat, isSupportedFormat } from '../../domain/models/Track';
 
@@ -27,10 +28,16 @@ function resolveFormat(filePath: string): TrackFormat | null {
 }
 
 function sanitizeString(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim().length > 0) {
-    return value.trim();
+  if (typeof value !== 'string') {
+    return null;
   }
-  return null;
+  // Drop control characters and unpaired UTF-16 surrogates that badly encoded tags can contain.
+  const cleaned = value
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '')
+    .trim();
+  return cleaned.length > 0 ? cleaned : null;
 }
 
 function sanitizeNumber(value: unknown): number | null {
@@ -126,6 +133,19 @@ export class MetadataParser implements IMetadataPort {
       return this.nativeParser;
     }
 
+    // Prefer the app's own null-safe reader: react-native-music-metadata throws on files with a
+    // missing duration or with '#', '?' or '%' in the name, and that exception crashes the app.
+    const safeReader = NativeModules.AudioAnalyzerModule;
+    if (safeReader?.readMetadata) {
+      this.nativeParser = {
+        getMetadata: async (uris: string[]): Promise<Array<Record<string, unknown>>> => {
+          const result = await safeReader.readMetadata(uris);
+          return Array.isArray(result) ? (result as Array<Record<string, unknown>>) : [];
+        },
+      };
+      return this.nativeParser;
+    }
+
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const musicMetadata = require('react-native-music-metadata');
@@ -168,6 +188,9 @@ export class MetadataParser implements IMetadataPort {
       const parser = this.getNativeParser();
       const results = await parser.getMetadata([filePath]);
       const raw = results[0] ?? {};
+      if (typeof raw.error === 'string') {
+        return { filePath, format, metadata: null, error: raw.error };
+      }
       const metadata = mapRawToTrackMetadata(raw, filePath);
 
       return {
@@ -225,6 +248,10 @@ export class MetadataParser implements IMetadataPort {
           }
 
           const raw = rawResults[j] ?? {};
+          if (typeof raw.error === 'string') {
+            results.push({ filePath: path, format, metadata: null, error: raw.error });
+            continue;
+          }
           const metadata = mapRawToTrackMetadata(raw, path);
 
           results.push({

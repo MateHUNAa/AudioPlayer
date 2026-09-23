@@ -13,10 +13,11 @@ import {
   ScrollView,
 } from 'react-native';
 import { Track } from '../../domain/models/Track';
-import { TrackItem } from '../components/TrackItem';
+import { TrackItem, TrackItemHeight } from '../components/TrackItem';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
 import { useFavourites } from '../hooks/useFavourites';
+import { useSuggestions } from '../hooks/useSuggestions';
 import { useAppContext } from '../context/AppContext';
 import {
   SearchIcon,
@@ -30,11 +31,12 @@ import {
   HeartFilledIcon,
   DiscIcon,
   PlaylistIcon,
+  RepeatIcon,
 } from '../components/Icons';
 
 type SortOption = 'title' | 'artist' | 'album' | 'duration' | 'addedAt';
 type SortDirection = 'asc' | 'desc';
-type BrowseTab = 'all' | 'favourites' | 'albums' | 'playlists';
+type BrowseTab = 'all' | 'suggested' | 'favourites' | 'albums' | 'playlists';
 
 interface SortState {
   readonly field: SortOption;
@@ -49,7 +51,22 @@ const SortLabels: Record<SortOption, string> = {
   addedAt: 'Date Added',
 } as const;
 
-const ItemHeight = 64 as const;
+const ItemHeight = TrackItemHeight;
+
+// One shared collator: calling localeCompare per comparison is far slower on Hermes.
+const Collator: { compare: (a: string, b: string) => number } =
+  typeof Intl !== 'undefined' && typeof Intl.Collator === 'function'
+    ? new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
+    : { compare: (a, b) => a.localeCompare(b) };
+
+function shuffled<T>(items: readonly T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
 
 function keyExtractor(item: Track): string {
   return item.id;
@@ -73,6 +90,7 @@ interface BrowseTabDef {
 
 const BrowseTabs: readonly BrowseTabDef[] = [
   { key: 'all', label: 'All Tracks' },
+  { key: 'suggested', label: 'Suggested' },
   { key: 'favourites', label: 'Favourites' },
   { key: 'albums', label: 'Albums' },
   { key: 'playlists', label: 'Playlists' },
@@ -82,17 +100,20 @@ interface LibraryScreenProps {
   readonly onNavigateAlbums?: () => void;
   readonly onNavigatePlaylists?: () => void;
   readonly onNavigateFavourites?: () => void;
+  readonly onNavigateSuggested?: () => void;
 }
 
 export function LibraryScreen({
   onNavigateAlbums,
   onNavigatePlaylists,
   onNavigateFavourites,
+  onNavigateSuggested,
 }: LibraryScreenProps) {
   const { playerState } = usePlayer();
   const { controls: libraryControls, libraryState } = useLibrary();
   const { controls: favControls, favouriteState } = useFavourites();
   const { actions } = useAppContext();
+  const suggestionCount = useSuggestions().length;
   const [searchQuery, setSearchQuery] = useState('');
   const [sortState, setSortState] = useState<SortState>({
     field: 'title',
@@ -125,9 +146,7 @@ export function LibraryScreen({
       }
 
       if (typeof aVal === 'string' && typeof bVal === 'string') {
-        const result = aVal.localeCompare(bVal, undefined, {
-          sensitivity: 'base',
-        });
+        const result = Collator.compare(aVal, bVal);
         return sortState.direction === 'asc' ? result : -result;
       }
 
@@ -190,8 +209,7 @@ export function LibraryScreen({
     if (filteredTracks.length === 0) {
       return;
     }
-    const shuffled = [...filteredTracks].sort(() => Math.random() - 0.5);
-    await actions.playCollection(shuffled, 0);
+    await actions.playCollection(shuffled(filteredTracks), 0);
   }, [actions, filteredTracks]);
 
   const handleToggleFavourite = useCallback(
@@ -215,9 +233,13 @@ export function LibraryScreen({
         onNavigateFavourites();
         return;
       }
+      if (tab === 'suggested' && onNavigateSuggested) {
+        onNavigateSuggested();
+        return;
+      }
       setActiveTab(tab);
     },
-    [onNavigateAlbums, onNavigatePlaylists, onNavigateFavourites],
+    [onNavigateAlbums, onNavigatePlaylists, onNavigateFavourites, onNavigateSuggested],
   );
 
   const renderItem = useCallback(
@@ -268,6 +290,9 @@ export function LibraryScreen({
                   {tab.key === 'all' && (
                     <MusicIcon size={16} color={isActive ? '#fff' : '#aaa'} />
                   )}
+                  {tab.key === 'suggested' && (
+                    <RepeatIcon size={16} color={isActive ? '#fff' : '#e8a838'} />
+                  )}
                   {tab.key === 'favourites' && (
                     <HeartFilledIcon
                       size={16}
@@ -292,13 +317,18 @@ export function LibraryScreen({
                 >
                   {tab.label}
                 </Text>
+                {tab.key === 'suggested' && suggestionCount > 0 && (
+                  <View style={styles.tabBadge}>
+                    <Text style={styles.tabBadgeText}>{suggestionCount}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       </View>
     );
-  }, [activeTab, handleTabPress]);
+  }, [activeTab, handleTabPress, suggestionCount]);
 
   const renderSortMenu = useCallback(() => {
     if (!showSortMenu) {
@@ -381,7 +411,7 @@ export function LibraryScreen({
           <Text
             style={styles.scanCurrentFile}
             numberOfLines={1}
-            ellipsizeMode="middle"
+            ellipsizeMode="tail"
           >
             {libraryState.scanProgress.currentFile}
           </Text>
@@ -698,6 +728,20 @@ const styles = StyleSheet.create({
   },
   browseTabTextActive: {
     color: '#fff',
+  },
+  tabBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    backgroundColor: '#e8a838',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#121212',
   },
   sortMenu: {
     backgroundColor: '#1a1a1a',

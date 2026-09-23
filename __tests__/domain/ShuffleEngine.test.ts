@@ -199,6 +199,7 @@ describe('ShuffleEngine', () => {
         artistFrequency: new Map(),
         albumFrequency: new Map(),
         selectionCount: 1,
+      anchorBpm: null,
       };
 
       const rng = () => 0;
@@ -217,6 +218,7 @@ describe('ShuffleEngine', () => {
         artistFrequency: new Map(),
         albumFrequency: new Map(),
         selectionCount: 1,
+      anchorBpm: null,
       };
 
       const rng = () => 0.5;
@@ -654,6 +656,7 @@ describe('ShuffleEngine', () => {
         artistFrequency: new Map([['Artist A', 5]]),
         albumFrequency: new Map([['Album 1', 3]]),
         selectionCount: 42,
+      anchorBpm: null,
       };
 
       const reset = resetShuffleState(dirtyState);
@@ -672,6 +675,7 @@ describe('ShuffleEngine', () => {
         artistFrequency: new Map(),
         albumFrequency: new Map(),
         selectionCount: 5,
+      anchorBpm: null,
       };
 
       expect(hasCompletedCycle(state, 10)).toBe(false);
@@ -683,6 +687,7 @@ describe('ShuffleEngine', () => {
         artistFrequency: new Map(),
         albumFrequency: new Map(),
         selectionCount: 10,
+      anchorBpm: null,
       };
 
       expect(hasCompletedCycle(state, 10)).toBe(true);
@@ -694,6 +699,7 @@ describe('ShuffleEngine', () => {
         artistFrequency: new Map(),
         albumFrequency: new Map(),
         selectionCount: 15,
+      anchorBpm: null,
       };
 
       expect(hasCompletedCycle(state, 10)).toBe(true);

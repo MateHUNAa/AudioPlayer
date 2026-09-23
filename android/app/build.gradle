@@ -17,7 +17,7 @@ react {
     //   The cli.js file which is the React Native CLI entrypoint. Default is ../../node_modules/react-native/cli.js
     // cliFile = file("../../node_modules/react-native/cli.js")
 
-    nodeExecutableAndArgs = ['C:\\nodejs\\node.exe']
+    nodeExecutableAndArgs = ['node']
     hermesCommand = "$rootDir/../scripts/hermesc-passthrough.bat"
 
     /* Variants */
@@ -76,6 +76,47 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+def aubioVersion = "0.4.9"
+def aubioDir = file("src/main/jni/aubio")
+def aubioZip = file("src/main/jni/aubio-${aubioVersion}.zip")
+def aubioOutputDir = file("build/aubio")
+def jniLibsDir = file("src/main/jniLibs")
+
+task downloadAubio {
+    outputs.dir(aubioDir)
+
+    doLast {
+        if (!aubioDir.exists()) {
+            logger.lifecycle("Downloading aubio ${aubioVersion} source...")
+            def url = "https://github.com/aubio/aubio/archive/refs/tags/${aubioVersion}.zip"
+            ant.get(src: url, dest: aubioZip, skipexisting: false)
+
+            logger.lifecycle("Extracting aubio source...")
+            copy {
+                from zipTree(aubioZip)
+                into file("src/main/jni")
+            }
+
+            def extractedDir = file("src/main/jni/aubio-${aubioVersion}")
+            if (extractedDir.exists()) {
+                extractedDir.renameTo(aubioDir)
+            }
+
+            if (aubioZip.exists()) {
+                aubioZip.delete()
+            }
+
+            logger.lifecycle("aubio source ready at ${aubioDir.absolutePath}")
+        }
+    }
+}
+
+tasks.whenTaskAdded { task ->
+    if (task.name.contains("externalNativeBuild") || task.name.contains("CMake") || task.name.contains("configureCMake")) {
+        task.dependsOn downloadAubio
+    }
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -88,7 +129,30 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+
+
+
+        // Disabled custom CMake - aubio libs are prebuilt in jniLibs
+        // externalNativeBuild {
+        //     cmake {
+        //         cppFlags ""
+        //         arguments "-DANDROID_STL=c++_shared"
+        //     }
+        // }
+
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+        }
     }
+
+    // Disabled custom CMake - aubio libs are prebuilt in jniLibs
+    // externalNativeBuild {
+    //     cmake {
+    //         path file("src/main/jni/CMakeLists.txt")
+    //         version "3.22.1"
+    //     }
+    // }
+
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -120,4 +184,8 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("androidx.core:core-ktx:1.15.0")
 }

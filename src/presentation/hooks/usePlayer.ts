@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
+import { upcomingTracks, totalTracks, currentIndex } from '../../domain/engine/QueueManager';
 import { Track } from '../../domain/models/Track';
 import { PlaybackStatus, ShuffleMode, RepeatMode } from '../../domain/models/PlaybackState';
 
@@ -18,8 +19,6 @@ interface PlayerControls {
 interface PlayerState {
   readonly status: PlaybackStatus;
   readonly currentTrack: Track | null;
-  readonly position: number;
-  readonly duration: number;
   readonly volume: number;
   readonly isMuted: boolean;
   readonly repeatMode: RepeatMode;
@@ -31,7 +30,6 @@ interface PlayerState {
   readonly isStopped: boolean;
   readonly isBuffering: boolean;
   readonly hasTrack: boolean;
-  readonly progress: number;
   readonly upcoming: Track[];
   readonly queueLength: number;
   readonly queueIndex: number;
@@ -42,9 +40,14 @@ interface UsePlayerResult {
   readonly playerState: PlayerState;
 }
 
+/**
+ * Playback position is intentionally not part of this hook: it changes every second and would
+ * re-render every screen. Components that show progress use usePlaybackProgress() instead.
+ */
 export function usePlayer(): UsePlayerResult {
   const { state, actions } = useAppContext();
-  const { playbackState } = state;
+  const { playbackState, queueManagerState } = state;
+  const queue = queueManagerState.queue;
 
   const play = useCallback(async (track: Track) => {
     await actions.playTrack(track);
@@ -94,15 +97,19 @@ export function usePlayer(): UsePlayerResult {
     setShuffleMode,
   }), [play, playInQueue, togglePlayback, next, previous, seekTo, seekByFraction, toggleShuffle, setShuffleMode]);
 
-  const progress = playbackState.duration > 0
-    ? playbackState.position / playbackState.duration
-    : 0;
+  const queueInfo = useMemo(
+    () => ({
+      upcoming: upcomingTracks(queueManagerState),
+      queueLength: totalTracks(queueManagerState),
+      queueIndex: currentIndex(queueManagerState),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [queue],
+  );
 
   const playerState: PlayerState = useMemo(() => ({
     status: playbackState.status,
     currentTrack: playbackState.currentTrack,
-    position: playbackState.position,
-    duration: playbackState.duration,
     volume: playbackState.volume,
     isMuted: playbackState.isMuted,
     repeatMode: playbackState.repeatMode,
@@ -114,23 +121,17 @@ export function usePlayer(): UsePlayerResult {
     isStopped: playbackState.status === 'stopped' || playbackState.status === 'idle',
     isBuffering: playbackState.status === 'buffering',
     hasTrack: playbackState.currentTrack !== null,
-    progress,
-    upcoming: actions.getUpcoming(),
-    queueLength: actions.getTotalTracks(),
-    queueIndex: actions.getCurrentIndex(),
+    ...queueInfo,
   }), [
     playbackState.status,
     playbackState.currentTrack,
-    playbackState.position,
-    playbackState.duration,
     playbackState.volume,
     playbackState.isMuted,
     playbackState.repeatMode,
     playbackState.shuffleMode,
     playbackState.playbackRate,
     playbackState.error,
-    progress,
-    actions,
+    queueInfo,
   ]);
 
   return { controls, playerState };

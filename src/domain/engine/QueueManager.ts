@@ -1,18 +1,57 @@
 import { Track } from '../models/Track';
-import { Queue, createQueue, createEmptyQueue, getCurrentTrack, hasNext, hasPrevious, advanceToNext, returnToPrevious, jumpToIndex, jumpToTrack, applyShuffledOrder, restoreOriginalOrder, appendTrack, insertNext, removeFromQueue, getUpcoming, loopToStart, replaceAllTracks, queueLength, isQueueEmpty } from '../models/Queue';
+import {
+  Queue,
+  createQueue,
+  createEmptyQueue,
+  getCurrentTrack,
+  hasNext,
+  hasPrevious,
+  advanceToNext,
+  returnToPrevious,
+  jumpToIndex,
+  jumpToTrack,
+  applyShuffledOrder,
+  restoreOriginalOrder,
+  appendTrack,
+  insertNext,
+  removeFromQueue,
+  getUpcoming,
+  loopToStart,
+  replaceAllTracks,
+  queueLength,
+  isQueueEmpty,
+} from '../models/Queue';
 import { ShuffleMode, RepeatMode } from '../models/PlaybackState';
-import { ShuffleConfig, createDefaultShuffleConfig, createRandomShuffleConfig } from '../models/ShuffleConfig';
-import { buildShuffledQueue, buildRandomQueue, createInitialShuffleState, ShuffleState } from './ShuffleEngine';
+import {
+  ShuffleConfig,
+  createDefaultShuffleConfig,
+  createRandomShuffleConfig,
+} from '../models/ShuffleConfig';
+import { SkipStatsMap, createEmptySkipStats } from '../models/SkipStats';
+import {
+  buildShuffledQueue,
+  buildRandomQueue,
+  createInitialShuffleState,
+  createEmptySession,
+  ShuffleState,
+  SessionFeedback,
+} from './ShuffleEngine';
 
 /** @field The current queue state */
 /** @field The active shuffle configuration */
 /** @field The running shuffle state tracking history and frequency */
 /** @field The active repeat mode */
+/** @field Persistent skip statistics influencing shuffle scoring */
+/** @field Loved track IDs (boosted by smart shuffle) */
+/** @field This app session's skips and full listens (steer smart shuffle, never persisted) */
 export interface QueueManagerState {
   readonly queue: Queue;
   readonly shuffleConfig: ShuffleConfig;
   readonly shuffleState: ShuffleState;
   readonly repeatMode: RepeatMode;
+  readonly skipStats: SkipStatsMap;
+  readonly favouriteIds: ReadonlySet<string>;
+  readonly session: SessionFeedback;
 }
 
 /** @returns A fresh QueueManagerState with empty queue and default config */
@@ -22,6 +61,9 @@ export function createInitialQueueManagerState(): QueueManagerState {
     shuffleConfig: createDefaultShuffleConfig(),
     shuffleState: createInitialShuffleState(),
     repeatMode: 'off',
+    skipStats: createEmptySkipStats(),
+    favouriteIds: new Set(),
+    session: createEmptySession(),
   };
 }
 
@@ -45,7 +87,8 @@ export function loadQueue(
   }
 
   const baseQueue = createQueue(tracks, startIndex);
-  const startTrack = tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))];
+  const startTrack =
+    tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))];
 
   if (shuffleMode === 'off') {
     return {
@@ -55,11 +98,7 @@ export function loadQueue(
     };
   }
 
-  return applyShuffle(
-    { ...state, queue: baseQueue },
-    shuffleMode,
-    startTrack,
-  );
+  return applyShuffle({ ...state, queue: baseQueue }, shuffleMode, startTrack);
 }
 
 /** @param state - Current QueueManagerState */
@@ -124,7 +163,10 @@ export function previous(state: QueueManagerState): QueueManagerState {
 /** @param state - Current QueueManagerState */
 /** @param index - Target index to skip to */
 /** @returns Updated QueueManagerState jumped to the given index */
-export function skipToIndex(state: QueueManagerState, index: number): QueueManagerState {
+export function skipToIndex(
+  state: QueueManagerState,
+  index: number,
+): QueueManagerState {
   return {
     ...state,
     queue: jumpToIndex(state.queue, index),
@@ -134,7 +176,10 @@ export function skipToIndex(state: QueueManagerState, index: number): QueueManag
 /** @param state - Current QueueManagerState */
 /** @param trackId - The ID of the track to skip to */
 /** @returns Updated QueueManagerState jumped to the track with the given ID */
-export function skipToTrack(state: QueueManagerState, trackId: string): QueueManagerState {
+export function skipToTrack(
+  state: QueueManagerState,
+  trackId: string,
+): QueueManagerState {
   return {
     ...state,
     queue: jumpToTrack(state.queue, trackId),
@@ -160,13 +205,16 @@ export function applyShuffle(
   }
 
   const anchorTrack = anchor ?? currentTrack(state);
-  const config = mode === 'random'
-    ? createRandomShuffleConfig()
-    : state.shuffleConfig;
+  const config =
+    mode === 'random' ? createRandomShuffleConfig() : state.shuffleConfig;
 
-  const shuffled = mode === 'random'
-    ? buildRandomQueue(tracks, anchorTrack, config.seed)
-    : buildShuffledQueue(tracks, anchorTrack, config);
+  const shuffled =
+    mode === 'random'
+      ? buildRandomQueue(tracks, anchorTrack, config.seed)
+      : buildShuffledQueue(tracks, anchorTrack, config, state.skipStats, {
+          favouriteIds: state.favouriteIds,
+          session: state.session,
+        });
 
   return {
     ...state,
@@ -190,7 +238,10 @@ export function disableShuffle(state: QueueManagerState): QueueManagerState {
 /** @param state - Current QueueManagerState */
 /** @param mode - The new repeat mode to set */
 /** @returns Updated QueueManagerState with the repeat mode changed */
-export function setRepeat(state: QueueManagerState, mode: RepeatMode): QueueManagerState {
+export function setRepeat(
+  state: QueueManagerState,
+  mode: RepeatMode,
+): QueueManagerState {
   return {
     ...state,
     repeatMode: mode,
@@ -211,7 +262,10 @@ export function cycleRepeat(state: QueueManagerState): QueueManagerState {
 /** @param state - Current QueueManagerState */
 /** @param track - Track to add to the end of the queue */
 /** @returns Updated QueueManagerState with the track appended */
-export function enqueue(state: QueueManagerState, track: Track): QueueManagerState {
+export function enqueue(
+  state: QueueManagerState,
+  track: Track,
+): QueueManagerState {
   return {
     ...state,
     queue: appendTrack(state.queue, track),
@@ -221,7 +275,10 @@ export function enqueue(state: QueueManagerState, track: Track): QueueManagerSta
 /** @param state - Current QueueManagerState */
 /** @param track - Track to insert as the next track after the current one */
 /** @returns Updated QueueManagerState with the track inserted next */
-export function playNext(state: QueueManagerState, track: Track): QueueManagerState {
+export function playNext(
+  state: QueueManagerState,
+  track: Track,
+): QueueManagerState {
   return {
     ...state,
     queue: insertNext(state.queue, track),
@@ -231,7 +288,10 @@ export function playNext(state: QueueManagerState, track: Track): QueueManagerSt
 /** @param state - Current QueueManagerState */
 /** @param trackId - The ID of the track to remove from the queue */
 /** @returns Updated QueueManagerState with the track removed */
-export function dequeue(state: QueueManagerState, trackId: string): QueueManagerState {
+export function dequeue(
+  state: QueueManagerState,
+  trackId: string,
+): QueueManagerState {
   return {
     ...state,
     queue: removeFromQueue(state.queue, trackId),
@@ -332,4 +392,90 @@ export function reshuffle(state: QueueManagerState): QueueManagerState {
     { ...state, shuffleState: createInitialShuffleState() },
     state.shuffleConfig.mode,
   );
+}
+
+/** @param state - Current QueueManagerState */
+/** @param skipStats - Updated skip statistics map to apply */
+/** @returns Updated QueueManagerState with new skip stats */
+export function updateSkipStats(
+  state: QueueManagerState,
+  skipStats: SkipStatsMap,
+): QueueManagerState {
+  return {
+    ...state,
+    skipStats,
+  };
+}
+
+/** How many already-played tracks feed spacing and vibe continuity when re-planning. */
+const ReplanHistory = 12;
+/** How many upcoming tracks a re-plan reorders; later ones keep their order. */
+export const ReplanWindow = 150;
+
+/** @param state - Current QueueManagerState */
+/** @returns State with everything after the current track re-ordered by smart shuffle using the latest session feedback, or the same state when not applicable */
+export function replanUpcoming(state: QueueManagerState): QueueManagerState {
+  const { queue } = state;
+  if (state.shuffleConfig.mode !== 'smart' || queue.currentIndex < 0) {
+    return state;
+  }
+  const upcoming = queue.tracks.slice(queue.currentIndex + 1);
+  if (upcoming.length < 2) {
+    return state;
+  }
+  const history = queue.tracks.slice(
+    Math.max(0, queue.currentIndex + 1 - ReplanHistory),
+    queue.currentIndex + 1,
+  );
+  const planned = buildShuffledQueue(upcoming, null, state.shuffleConfig, state.skipStats, {
+    favouriteIds: state.favouriteIds,
+    session: state.session,
+    history,
+    limit: ReplanWindow,
+  });
+  return {
+    ...state,
+    queue: {
+      ...queue,
+      tracks: [...queue.tracks.slice(0, queue.currentIndex + 1), ...planned.tracks],
+    },
+  };
+}
+
+/** @param state - Current QueueManagerState */
+/** @param session - Updated session feedback */
+/** @returns State with the new session feedback applied */
+export function updateSession(
+  state: QueueManagerState,
+  session: SessionFeedback,
+): QueueManagerState {
+  return { ...state, session };
+}
+
+/** @param state - Current QueueManagerState */
+/** @param favouriteIds - Current loved track IDs */
+/** @returns State with favourites applied */
+export function updateFavourites(
+  state: QueueManagerState,
+  favouriteIds: ReadonlySet<string>,
+): QueueManagerState {
+  return { ...state, favouriteIds };
+}
+
+/** @param state - Current QueueManagerState */
+/** @param tracksById - Latest track objects (e.g. with fresh analysis) */
+/** @returns State whose queue references the latest track objects */
+export function refreshQueueTracks(
+  state: QueueManagerState,
+  tracksById: ReadonlyMap<string, Track>,
+): QueueManagerState {
+  const { queue } = state;
+  if (queue.tracks.length === 0) {
+    return state;
+  }
+  const swap = (list: readonly Track[]) => list.map(t => tracksById.get(t.id) ?? t);
+  return {
+    ...state,
+    queue: { ...queue, tracks: swap(queue.tracks), originalOrder: swap(queue.originalOrder) },
+  };
 }

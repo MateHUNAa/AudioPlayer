@@ -2,10 +2,18 @@ import { TrackPlayerAdapter } from '../infrastructure/adapters/TrackPlayerAdapte
 import { FileSystemAdapter } from '../infrastructure/adapters/FileSystemAdapter';
 import { MetadataParser } from '../infrastructure/adapters/MetadataParser';
 import { StorageAdapter } from '../infrastructure/adapters/StorageAdapter';
+import { BpmAdapter } from '../infrastructure/adapters/BpmAdapter';
+import { SkipStatsAdapter } from '../infrastructure/adapters/SkipStatsAdapter';
+import { AudioAnalyzerAdapter } from '../infrastructure/adapters/AudioAnalyzerAdapter';
+import { BackupAdapter } from '../infrastructure/adapters/BackupAdapter';
 import { IAudioPort } from '../domain/ports/IAudioPort';
 import { IFileSystemPort } from '../domain/ports/IFileSystemPort';
 import { IMetadataPort } from '../domain/ports/IMetadataPort';
 import { IStoragePort } from '../domain/ports/IStoragePort';
+import { IBpmPort } from '../domain/ports/IBpmPort';
+import { ISkipStatsPort } from '../domain/ports/ISkipStatsPort';
+import { IAnalysisPort } from '../domain/ports/IAnalysisPort';
+import { IBackupPort } from '../domain/ports/IBackupPort';
 import { ScanLibraryUseCase } from '../application/usecases/ScanLibraryUseCase';
 import { PlayTrackUseCase } from '../application/usecases/PlayTrackUseCase';
 import { TogglePlaybackUseCase } from '../application/usecases/TogglePlaybackUseCase';
@@ -14,6 +22,8 @@ import { PreviousTrackUseCase } from '../application/usecases/PreviousTrackUseCa
 import { SeekUseCase } from '../application/usecases/SeekUseCase';
 import { ToggleShuffleUseCase } from '../application/usecases/ToggleShuffleUseCase';
 import { BuildQueueUseCase } from '../application/usecases/BuildQueueUseCase';
+import { AnalyzeBpmUseCase } from '../application/usecases/AnalyzeBpmUseCase';
+import { RecordSkipUseCase } from '../application/usecases/RecordSkipUseCase';
 
 /** @field Singleton flag tracking whether the container has been initialized */
 /** @field Lazily created adapter and use case instances */
@@ -22,6 +32,10 @@ interface ContainerRegistry {
   fileSystemPort: IFileSystemPort | null;
   metadataPort: IMetadataPort | null;
   storagePort: IStoragePort | null;
+  bpmPort: IBpmPort | null;
+  skipStatsPort: ISkipStatsPort | null;
+  analysisPort: IAnalysisPort | null;
+  backupPort: IBackupPort | null;
   scanLibraryUseCase: ScanLibraryUseCase | null;
   playTrackUseCase: PlayTrackUseCase | null;
   togglePlaybackUseCase: TogglePlaybackUseCase | null;
@@ -30,6 +44,8 @@ interface ContainerRegistry {
   seekUseCase: SeekUseCase | null;
   toggleShuffleUseCase: ToggleShuffleUseCase | null;
   buildQueueUseCase: BuildQueueUseCase | null;
+  analyzeBpmUseCase: AnalyzeBpmUseCase | null;
+  recordSkipUseCase: RecordSkipUseCase | null;
 }
 
 const registry: ContainerRegistry = {
@@ -37,6 +53,10 @@ const registry: ContainerRegistry = {
   fileSystemPort: null,
   metadataPort: null,
   storagePort: null,
+  bpmPort: null,
+  skipStatsPort: null,
+  analysisPort: null,
+  backupPort: null,
   scanLibraryUseCase: null,
   playTrackUseCase: null,
   togglePlaybackUseCase: null,
@@ -45,6 +65,8 @@ const registry: ContainerRegistry = {
   seekUseCase: null,
   toggleShuffleUseCase: null,
   buildQueueUseCase: null,
+  analyzeBpmUseCase: null,
+  recordSkipUseCase: null,
 };
 
 /** @returns Singleton IAudioPort backed by TrackPlayerAdapter */
@@ -77,6 +99,38 @@ function resolveStoragePort(): IStoragePort {
     registry.storagePort = new StorageAdapter();
   }
   return registry.storagePort;
+}
+
+/** @returns Singleton IBpmPort backed by BpmAdapter */
+function resolveBpmPort(): IBpmPort {
+  if (!registry.bpmPort) {
+    registry.bpmPort = new BpmAdapter();
+  }
+  return registry.bpmPort;
+}
+
+/** @returns Singleton ISkipStatsPort backed by SkipStatsAdapter */
+function resolveSkipStatsPort(): ISkipStatsPort {
+  if (!registry.skipStatsPort) {
+    registry.skipStatsPort = new SkipStatsAdapter();
+  }
+  return registry.skipStatsPort;
+}
+
+/** @returns Singleton IAnalysisPort backed by the native AudioAnalyzerModule */
+function resolveAnalysisPort(): IAnalysisPort {
+  if (!registry.analysisPort) {
+    registry.analysisPort = new AudioAnalyzerAdapter();
+  }
+  return registry.analysisPort;
+}
+
+/** @returns Singleton IBackupPort writing to shared storage */
+function resolveBackupPort(): IBackupPort {
+  if (!registry.backupPort) {
+    registry.backupPort = new BackupAdapter();
+  }
+  return registry.backupPort;
 }
 
 /** @returns Singleton ScanLibraryUseCase wired with file system, metadata, and storage ports */
@@ -167,6 +221,22 @@ function resolveBuildQueueUseCase(): BuildQueueUseCase {
   return registry.buildQueueUseCase;
 }
 
+/** @returns Singleton AnalyzeBpmUseCase wired with BPM port */
+function resolveAnalyzeBpmUseCase(): AnalyzeBpmUseCase {
+  if (!registry.analyzeBpmUseCase) {
+    registry.analyzeBpmUseCase = new AnalyzeBpmUseCase(resolveBpmPort());
+  }
+  return registry.analyzeBpmUseCase;
+}
+
+/** @returns Singleton RecordSkipUseCase wired with skip stats port */
+function resolveRecordSkipUseCase(): RecordSkipUseCase {
+  if (!registry.recordSkipUseCase) {
+    registry.recordSkipUseCase = new RecordSkipUseCase(resolveSkipStatsPort());
+  }
+  return registry.recordSkipUseCase;
+}
+
 /** @param port - Custom IAudioPort implementation to swap in */
 function overrideAudioPort(port: IAudioPort): void {
   registry.audioPort = port;
@@ -176,6 +246,19 @@ function overrideAudioPort(port: IAudioPort): void {
   registry.previousTrackUseCase = null;
   registry.seekUseCase = null;
   registry.buildQueueUseCase = null;
+}
+
+/** @param port - Custom IBpmPort implementation to swap in */
+function overrideBpmPort(port: IBpmPort): void {
+  registry.bpmPort = port;
+  registry.analyzeBpmUseCase = null;
+  registry.recordSkipUseCase = null;
+}
+
+/** @param port - Custom ISkipStatsPort implementation to swap in */
+function overrideSkipStatsPort(port: ISkipStatsPort): void {
+  registry.skipStatsPort = port;
+  registry.recordSkipUseCase = null;
 }
 
 /** @param port - Custom IFileSystemPort implementation to swap in */
@@ -208,6 +291,10 @@ function resetAll(): void {
   registry.fileSystemPort = null;
   registry.metadataPort = null;
   registry.storagePort = null;
+  registry.bpmPort = null;
+  registry.skipStatsPort = null;
+  registry.analysisPort = null;
+  registry.backupPort = null;
   registry.scanLibraryUseCase = null;
   registry.playTrackUseCase = null;
   registry.togglePlaybackUseCase = null;
@@ -216,6 +303,7 @@ function resetAll(): void {
   registry.seekUseCase = null;
   registry.toggleShuffleUseCase = null;
   registry.buildQueueUseCase = null;
+  registry.analyzeBpmUseCase = null;
 }
 
 export const Container = {
@@ -223,6 +311,10 @@ export const Container = {
   resolveFileSystemPort,
   resolveMetadataPort,
   resolveStoragePort,
+  resolveBpmPort,
+  resolveSkipStatsPort,
+  resolveAnalysisPort,
+  resolveBackupPort,
   resolveScanLibraryUseCase,
   resolvePlayTrackUseCase,
   resolveTogglePlaybackUseCase,
@@ -231,9 +323,13 @@ export const Container = {
   resolveSeekUseCase,
   resolveToggleShuffleUseCase,
   resolveBuildQueueUseCase,
+  resolveAnalyzeBpmUseCase,
+  resolveRecordSkipUseCase,
   overrideAudioPort,
   overrideFileSystemPort,
   overrideMetadataPort,
   overrideStoragePort,
+  overrideBpmPort,
+  overrideSkipStatsPort,
   resetAll,
 } as const;
